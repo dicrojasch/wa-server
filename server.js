@@ -61,21 +61,20 @@ app.post('/send', async (req, res) => {
     try {
         console.log(`Sending image to ${chatId}...`);
 
-        // Send text
-        await client.sendMessage(chatId, message);
-
         // Send Image if path is provided (since Python and Node are on the same Pi)
         if (imagePath) {
             const absolutePath = path.resolve(imagePath);
             if (fs.existsSync(absolutePath)) {
                 console.log(`✅ Image found at: ${absolutePath}. Sending image...`);
-                const media = MessageMedia.fromFilePath(absolutePath);
-                await client.sendMessage(chatId, media);
+                const media = MessageMedia.fromFilePath(path.resolve(imagePath));
+                await client.sendMessage(chatId, media, { caption: message });
                 console.log('✅ Image sent successfully!');
             } else {
                 console.warn(`🛑 Image path NOT found: ${absolutePath}. Skipping image send.`);
             }
         } else {
+            // If there is no file, just send the plain text message
+            await client.sendMessage(chatId, message);
             console.log('ℹ️ No imagePath provided, sending text only.');
         }
 
