@@ -22,12 +22,12 @@ const securityCheck = (req, res, next) => {
     const apiKey = req.headers['x-api-key'];
     const clientIp = req.ip || req.connection.remoteAddress;
 
-    // Only allow localhost (127.0.0.1 or ::1)
-    const isLocalhost = clientIp === '127.0.0.1' || clientIp === '::ffff:127.0.0.1' || clientIp === '::1';
+    const allowedIps = (process.env.ALLOWED_IPS || '127.0.0.1,::ffff:127.0.0.1,::1').split(',');
+    const isAllowed = allowedIps.includes(clientIp);
 
-    if (!isLocalhost) {
+    if (!isAllowed) {
         console.warn(`🚨 Blocked unauthorized external access attempt from: ${clientIp}`);
-        return res.status(403).json({ error: 'Access denied: Localhost only' });
+        return res.status(403).json({ error: 'Access denied: IP not allowed' });
     }
 
     if (apiKey !== SECRET_KEY) {
