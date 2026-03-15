@@ -2,6 +2,8 @@ const express = require('express');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
+const fs = require('fs');
+
 
 const app = express();
 app.use(express.json()); // Allow JSON requests
@@ -64,11 +66,20 @@ app.post('/send', async (req, res) => {
 
         // Send Image if path is provided (since Python and Node are on the same Pi)
         if (imagePath) {
-            const media = MessageMedia.fromFilePath(path.resolve(imagePath));
-            await client.sendMessage(chatId, media);
+            const absolutePath = path.resolve(imagePath);
+            if (fs.existsSync(absolutePath)) {
+                console.log(`✅ Image found at: ${absolutePath}. Sending image...`);
+                const media = MessageMedia.fromFilePath(absolutePath);
+                await client.sendMessage(chatId, media);
+                console.log('✅ Image sent successfully!');
+            } else {
+                console.warn(`🛑 Image path NOT found: ${absolutePath}. Skipping image send.`);
+            }
+        } else {
+            console.log('ℹ️ No imagePath provided, sending text only.');
         }
 
-        console.log('Success!');
+        console.log('✅ Success!');
         res.status(200).json({ status: 'sent', target: chatId });
 
     } catch (err) {
