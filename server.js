@@ -29,6 +29,8 @@ const securityCheck = (req, res, next) => {
         console.warn(`🚨 Blocked unauthorized external access attempt from: ${clientIp}`);
         return res.status(403).json({ error: 'Access denied: IP not allowed' });
     }
+    console.log("apiKey", apiKey)
+    console.log("SECRET_KEY", SECRET_KEY)
 
     if (apiKey !== SECRET_KEY) {
         console.warn(`🚨 Invalid API Key attempt from: ${clientIp}`);
@@ -99,57 +101,78 @@ client.on('disconnected', () => {
 
 client.initialize();
 
-// 4. Create the Local API Endpoint for Python
-app.post('/send', securityCheck, async (req, res) => {
+// 4. Shared helper for sending messages
+const handleMessageRequest = async (req, res, getMedia) => {
     if (!isReady) {
         return res.status(503).json({ error: 'WhatsApp is not ready yet.' });
     }
 
-    const { phone, message, imagePath } = req.body;
+    const { phone, message } = req.body;
 
     if (!phone || !message) {
         return res.status(400).json({ error: 'Phone and message are required.' });
     }
 
-    // Clean phone number for Colombia format
+    // Clean phone number
     let chatId;
     if (phone.includes('@g.us')) {
-        chatId = phone; // It's already a Group ID
+        chatId = phone; // Group ID
     } else {
         const cleanNumber = phone.replace(/\D/g, '');
         chatId = `${cleanNumber}@c.us`; // Standard contact
     }
 
     try {
-        console.log(`Sending image to ${chatId}...`);
+        console.log(`Processing message to ${chatId}...`);
+        const media = await getMedia(req.body);
 
-        // Send Image if path is provided (since Python and Node are on the same Pi)
-        if (imagePath) {
-            const absolutePath = path.resolve(imagePath);
-            if (fs.existsSync(absolutePath)) {
-                console.log(`✅ Image found at: ${absolutePath}. Sending image...`);
-                const media = MessageMedia.fromFilePath(path.resolve(imagePath));
-                await client.sendMessage(chatId, media, { caption: message });
-                console.log('✅ Image sent successfully!');
-            } else {
-                console.warn(`🛑 Image path NOT found: ${absolutePath}. Skipping image send.`);
-            }
+        if (media) {
+            await client.sendMessage(chatId, media, { caption: message });
+            console.log('✅ Message with media sent successfully!');
         } else {
-            // If there is no file, just send the plain text message
             await client.sendMessage(chatId, message);
-            console.log('ℹ️ No imagePath provided, sending text only.');
+            console.log('ℹ️ Sent text-only message.');
         }
 
         console.log('✅ Success!');
         res.status(200).json({ status: 'sent', target: chatId });
 
     } catch (err) {
-        console.error('Failed to send:', err);
+        console.error('❌ Failed to send:', err);
         res.status(500).json({ error: err.message });
     }
+};
+
+// 5. API Endpoints
+app.post('/send', securityCheck, async (req, res) => {
+    await handleMessageRequest(req, res, async (body) => {
+        const { imagePath } = body;
+        if (imagePath) {
+            const absolutePath = path.resolve(imagePath);
+            if (fs.existsSync(absolutePath)) {
+                console.log(`✅ Image found at: ${absolutePath}`);
+                return MessageMedia.fromFilePath(absolutePath);
+            } else {
+                console.warn(`🛑 Image path NOT found: ${absolutePath}.`);
+            }
+        }
+        return null;
+    });
 });
 
-// 5. Start the server on port 3000
+app.post('/send-base64', securityCheck, async (req, res) => {
+    await handleMessageRequest(req, res, async (body) => {
+        const { imageBase64, mimetype = 'image/png', filename = 'image.png' } = body;
+        if (imageBase64) {
+            const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, "");
+            console.log(`✅ Base64 image data received.`);
+            return new MessageMedia(mimetype, base64Data, filename);
+        }
+        return null;
+    });
+});
+
+// 6. Start the server on port 3000
 app.listen(PORT, () => {
     console.log(`🚀 Local API listening on http://localhost:${PORT}`);
 });
