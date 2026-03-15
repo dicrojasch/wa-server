@@ -8,11 +8,12 @@ const fs = require('fs');
 
 
 const app = express();
-app.use(express.json()); // Allow JSON requests
 
 // 1. Basic Security Headers
 app.use(helmet());
-app.use(express.json());
+// Reemplaza app.use(express.json()); con esto:
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const PORT = 3000;
 const SECRET_KEY = process.env.API_KEY;
