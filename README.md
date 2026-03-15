@@ -23,7 +23,7 @@ This server acts as a persistent bridge between your Python logic and the WhatsA
 
 2.  **Install dependencies:**
     ```bash
-    npm install whatsapp-web.js qrcode-terminal express
+    npm install whatsapp-web.js qrcode-terminal express dotenv helmet
     ```
 
 ---

@@ -64,15 +64,31 @@ client.on('ready', async () => {
     console.log('✅ WhatsApp API Server is READY!');
     isReady = true;
 
-    // --- TEMPORAL: Log all group IDs to find yours ---
-    const chats = await client.getChats();
-    const groups = chats.filter(chat => chat.isGroup);
+    console.log('⏳ Waiting 10 seconds for WhatsApp to sync chats into memory...');
 
-    console.log('\n--- YOUR GROUPS ---');
-    groups.forEach(group => {
-        console.log(`Group Name: ${group.name} | ID: ${group.id._serialized}`);
-    });
-    console.log('-------------------\n');
+    // Add a delay before fetching the heavy chat list
+    setTimeout(async () => {
+        try {
+            console.log('Fetching chats now...');
+            const chats = await client.getChats();
+
+            // Filter only the groups
+            const groups = chats.filter(chat => chat.isGroup);
+
+            console.log('\n--- YOUR GROUPS ---');
+            if (groups.length === 0) {
+                console.log('No groups found. Sync might be incomplete.');
+            } else {
+                groups.forEach(group => {
+                    console.log(`Group Name: ${group.name} | ID: ${group.id._serialized}`);
+                });
+            }
+            console.log('-------------------\n');
+
+        } catch (error) {
+            console.error('❌ Error trying to fetch groups:', error.message);
+        }
+    }, 10000); // 10000 ms = 10 seconds
 });
 
 
