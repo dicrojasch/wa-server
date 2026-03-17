@@ -134,17 +134,13 @@ client.initialize();
 const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
 
 client.on('message', async msg => {
-    // Only process text messages starting with "/"
-    logger.info(`Received command: ${command} from ${msg.from}`);
+    // GLOBAL LOG: This will tell us if the event is even firing
+    logger.info(`Message received from: ${msg.from} | Content: ${msg.body}`);
 
-    if (!msg.body || !msg.body.startsWith('/')) {
-        logger.info('Message does not start with "/"');
-        return;
-    }
+    if (!msg.body || !msg.body.startsWith('/')) return;
 
-    // RESTRICTION: Only listen to the specific group
     if (msg.from !== ALLOWED_GROUP_ID) {
-        logger.info('Message is not from the allowed group');
+        logger.warn(`Ignored message from unauthorized source: ${msg.from}`);
         return;
     }
 
