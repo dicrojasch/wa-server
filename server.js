@@ -131,7 +131,7 @@ client.on('disconnected', () => {
 client.initialize();
 
 // Bot Command Listener
-const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID || '120363425857877607@g.us';
+const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
 
 client.on('message', async msg => {
     // Only process text messages starting with "/"
@@ -230,9 +230,6 @@ client.on('message', async msg => {
         return;
     }
 });
-
-
-client.initialize();
 
 // 4. Shared helper for sending messages
 const handleMessageRequest = async (req, res, getMedia) => {
