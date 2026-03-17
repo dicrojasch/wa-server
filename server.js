@@ -5,6 +5,36 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
 const fs = require('fs');
+const sqlite3 = require('sqlite3').verbose();
+const winston = require('winston');
+
+// Logger configuration
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        winston.format.printf(({ timestamp, level, message }) => {
+            return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console(),
+        new winston.transports.File({ filename: 'server.log' })
+    ],
+});
+
+// Database setup
+const DB_PATH = process.env.DB_PATH || 'trading_data.db';
+const db = new sqlite3.Database(DB_PATH, (err) => {
+    if (err) {
+        logger.error(`Error opening SQLite database: ${err.message}`);
+    } else {
+        logger.info(`Connected to SQLite database: ${DB_PATH}`);
+        db.run(`CREATE TABLE IF NOT EXISTS active_tickers (
+            ticker TEXT PRIMARY KEY
+        )`);
+    }
+});
 
 
 const app = express();
@@ -27,14 +57,12 @@ const securityCheck = (req, res, next) => {
     const isAllowed = allowedIps.includes(clientIp);
 
     if (!isAllowed) {
-        console.warn(`🚨 Blocked unauthorized external access attempt from: ${clientIp}`);
+        logger.warn(`Blocked unauthorized external access attempt from: ${clientIp}`);
         return res.status(403).json({ error: 'Access denied: IP not allowed' });
     }
-    console.log("apiKey", apiKey)
-    console.log("SECRET_KEY", SECRET_KEY)
 
     if (apiKey !== SECRET_KEY) {
-        console.warn(`🚨 Invalid API Key attempt from: ${clientIp}`);
+        logger.warn(`Invalid API Key attempt from: ${clientIp}`);
         return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
     }
 
@@ -59,46 +87,149 @@ const client = new Client({
 let isReady = false;
 
 client.on('qr', (qr) => {
-    console.log('\nScan this QR code:');
+    logger.info('Scan QR code requested.');
     qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', async () => {
-    console.log('✅ WhatsApp API Server is READY!');
+    logger.info('WhatsApp API Server is READY!');
     isReady = true;
 
-    console.log('⏳ Waiting 10 seconds for WhatsApp to sync chats into memory...');
+    logger.info('Waiting 10 seconds for WhatsApp to sync chats into memory...');
 
     // Add a delay before fetching the heavy chat list
     setTimeout(async () => {
         try {
-            console.log('Fetching chats now...');
+            logger.info('Fetching chats now...');
             const chats = await client.getChats();
 
             // Filter only the groups
             const groups = chats.filter(chat => chat.isGroup);
 
-            console.log('\n--- YOUR GROUPS ---');
+            logger.info('--- YOUR GROUPS ---');
             if (groups.length === 0) {
-                console.log('No groups found. Sync might be incomplete.');
+                logger.info('No groups found. Sync might be incomplete.');
             } else {
                 groups.forEach(group => {
-                    console.log(`Group Name: ${group.name} | ID: ${group.id._serialized}`);
+                    logger.info(`Group Name: ${group.name} | ID: ${group.id._serialized}`);
                 });
             }
-            console.log('-------------------\n');
+            logger.info('-------------------');
 
         } catch (error) {
-            console.error('❌ Error trying to fetch groups:', error.message);
+            logger.error(`Error trying to fetch groups: ${error.message}`);
         }
     }, 10000); // 10000 ms = 10 seconds
 });
 
-
 client.on('disconnected', () => {
-    console.log('❌ WhatsApp disconnected.');
+    logger.warn('WhatsApp disconnected.');
     isReady = false;
 });
+
+client.initialize();
+
+// Bot Command Listener
+const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID || '120363425857877607@g.us';
+
+client.on('message', async msg => {
+    // Only process text messages starting with "/"
+    if (!msg.body || !msg.body.startsWith('/')) return;
+
+    // RESTRICTION: Only listen to the specific group
+    if (msg.from !== ALLOWED_GROUP_ID) {
+        return;
+    }
+
+    const args = msg.body.trim().split(/\s+/);
+    const command = args.shift().toLowerCase();
+
+    logger.info(`Received command: ${command} from ${msg.from}`);
+
+    if (command === '/start') {
+        await msg.reply(
+            "Welcome to the Stock Notification Bot!\n\n" +
+            "Commands:\n" +
+            "/add [ticker] - Add a ticker to the active list\n" +
+            "/remove [ticker] - Remove a ticker from the active list\n" +
+            "/list - List all active tickers"
+        );
+        return;
+    }
+
+    if (command === '/add') {
+        if (args.length === 0) {
+            await msg.reply("Usage: /add [ticker]");
+            return;
+        }
+
+        const ticker = args[0].toUpperCase();
+        logger.info(`Adding ticker: ${ticker}`);
+
+        db.run("INSERT INTO active_tickers (ticker) VALUES (?)", [ticker], function (err) {
+            if (err) {
+                if (err.message.includes("UNIQUE constraint failed") || err.code === 'SQLITE_CONSTRAINT') {
+                    logger.warn(`Ticker ${ticker} already exists.`);
+                    msg.reply(`⚠️ ${ticker} is already in the list.`);
+                } else {
+                    logger.error(`DB error adding ticker: ${err.message}`);
+                    msg.reply(`❌ Error: ${err.message}`);
+                }
+            } else {
+                logger.info(`Successfully added ticker: ${ticker}`);
+                msg.reply(`✅ Added ${ticker} to active tickers.`);
+            }
+        });
+        return;
+    }
+
+    if (command === '/remove') {
+        if (args.length === 0) {
+            await msg.reply("Usage: /remove [ticker]");
+            return;
+        }
+
+        const ticker = args[0].toUpperCase();
+        logger.info(`Removing ticker: ${ticker}`);
+
+        db.run("DELETE FROM active_tickers WHERE ticker = ?", [ticker], function (err) {
+            if (err) {
+                logger.error(`DB error removing ticker: ${err.message}`);
+                msg.reply(`❌ Error: ${err.message}`);
+            } else if (this.changes > 0) {
+                logger.info(`Successfully removed ticker: ${ticker}`);
+                msg.reply(`✅ Removed ${ticker} from active tickers.`);
+            } else {
+                logger.warn(`Ticker ${ticker} not found for removal.`);
+                msg.reply(`⚠️ ${ticker} was not found in the list.`);
+            }
+        });
+        return;
+    }
+
+    if (command === '/list') {
+        logger.info('Listing active tickers');
+        db.all("SELECT ticker FROM active_tickers ORDER BY ticker", [], (err, rows) => {
+            if (err) {
+                logger.error(`DB error listing tickers: ${err.message}`);
+                msg.reply(`❌ Error: ${err.message}`);
+                return;
+            }
+
+            if (rows && rows.length > 0) {
+                const tickers = rows.map(r => r.ticker).join('\n');
+                const message = `📋 *Active Tickers:*\n\n${tickers}`;
+                logger.info(`Found ${rows.length} tickers.`);
+                msg.reply(message);
+            } else {
+                logger.info('Active tickers list is empty.');
+                msg.reply("📋 The active tickers list is empty.");
+            }
+        });
+        return;
+    }
+});
+
 
 client.initialize();
 
@@ -124,22 +255,22 @@ const handleMessageRequest = async (req, res, getMedia) => {
     }
 
     try {
-        console.log(`Processing message to ${chatId}...`);
+        logger.info(`Processing message to ${chatId}...`);
         const media = await getMedia(req.body);
 
         if (media) {
             await client.sendMessage(chatId, media, { caption: message });
-            console.log('✅ Message with media sent successfully!');
+            logger.info('Message with media sent successfully!');
         } else {
             await client.sendMessage(chatId, message);
-            console.log('ℹ️ Sent text-only message.');
+            logger.info('Sent text-only message.');
         }
 
-        console.log('✅ Success!');
+        logger.info('Success!');
         res.status(200).json({ status: 'sent', target: chatId });
 
     } catch (err) {
-        console.error('❌ Failed to send:', err);
+        logger.error(`Failed to send: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 };
@@ -151,10 +282,10 @@ app.post('/send', securityCheck, async (req, res) => {
         if (imagePath) {
             const absolutePath = path.resolve(imagePath);
             if (fs.existsSync(absolutePath)) {
-                console.log(`✅ Image found at: ${absolutePath}`);
+                logger.info(`Image found at: ${absolutePath}`);
                 return MessageMedia.fromFilePath(absolutePath);
             } else {
-                console.warn(`🛑 Image path NOT found: ${absolutePath}.`);
+                logger.warn(`Image path NOT found: ${absolutePath}.`);
             }
         }
         return null;
@@ -166,7 +297,7 @@ app.post('/send-base64', securityCheck, async (req, res) => {
         const { imageBase64, mimetype = 'image/png', filename = 'image.png' } = body;
         if (imageBase64) {
             const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, "");
-            console.log(`✅ Base64 image data received.`);
+            logger.info('Base64 image data received.');
             return new MessageMedia(mimetype, base64Data, filename);
         }
         return null;
@@ -175,5 +306,5 @@ app.post('/send-base64', securityCheck, async (req, res) => {
 
 // 6. Start the server on port 3000
 app.listen(PORT, () => {
-    console.log(`🚀 Local API listening on http://localhost:${PORT}`);
+    logger.info(`Local API listening on http://localhost:${PORT}`);
 });

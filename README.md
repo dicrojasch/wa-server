@@ -23,8 +23,26 @@ This server acts as a persistent bridge between your Python logic and the WhatsA
 
 2.  **Install dependencies:**
     ```bash
-    npm install whatsapp-web.js qrcode-terminal express dotenv helmet
+    npm install whatsapp-web.js qrcode-terminal express dotenv helmet sqlite3
     ```
+
+---
+
+## 🤖 WhatsApp Bot Commands
+The server now includes a built-in bot to manage active stock tickers directly from WhatsApp messages.
+
+*   `/start`: Welcome message and command list.
+*   `/add [ticker]`: Add a ticker to the active list (e.g., `/add AAPL`).
+*   `/remove [ticker]`: Remove a ticker from the list (e.g., `/remove AAPL`).
+*   `/list`: Display all currently active tickers.
+
+> [!NOTE]
+> Bot commands are restricted to the `ALLOWED_GROUP_ID` defined in your environment variables for security.
+
+---
+
+## 📝 Logging
+The server uses **Winston** for professional logging. Logs are displayed in the console and saved to `server.log` in the root directory.
 
 ---
 
@@ -53,47 +71,23 @@ sudo systemctl start wa-invoice-server.service
 ```
 #### Verification and logs 
 ```bash
-sudo systemctl status wa-invoice-server.service
-journalctl -u wa-invoice-server.service -f
+# PM2 is also an option if preferred
+pm2 start server.js --name wa-invoice-server
 ```
-
-#### Maintenance Commands
-
-| Action            | Command                                            |
-| ----------------- | -------------------------------------------------- |
-| Stop Server       | `sudo systemctl stop wa-invoice-server.service`    |
-| Restart Server    | `sudo systemctl restart wa-invoice-server.service` |
-| View Last 50 Logs | `journalctl -u wa-invoice-server.service -n 50`    |
-
-### Service Configuration
-The service file is located at: `/etc/systemd/system/wa-invoice-server.service`
-
-### Common Commands
-* **Start Server:** `sudo systemctl start wa-invoice-server`
-* **Stop Server:** `sudo systemctl stop wa-invoice-server`
-* **Restart Server:** `sudo systemctl restart wa-invoice-server`
-* **Check Status:** `sudo systemctl status wa-invoice-server`
-* **View Real-time Logs:** `journalctl -u wa-invoice-server -f`
 
 ---
 
 ## 🚦 API Endpoints
 
-The server listens on **port 3000**.
+The server listens on **port 3000**. All endpoints require `x-api-key` in headers.
 
 #### `POST /send`
-Sends a text message and an optional PDF document.
+Sends a text message and an optional local image.
+* **Body (JSON):** `{"phone": "...", "message": "...", "imagePath": "..."}`
 
-* **URL:** `http://localhost:3000/send`
-* **Method:** `POST`
-* **Body (JSON):**
-    ```json
-    {
-      "phone": "573204973157",
-      "message": "Hello! This is your invoice.",
-      "pdfPath": "/home/diego/invoices/inv_001.pdf"
-    }
-    ```
+#### `POST /send-base64`
+Sends a message with a base64 encoded image.
+* **Body (JSON):** `{"phone": "...", "message": "...", "imageBase64": "...", "mimetype": "image/png"}`
 
 ---
 
@@ -102,18 +96,14 @@ Sends a text message and an optional PDF document.
 ```python
 import requests
 
-def send_whatsapp(phone, message, pdf=None):
+def send_whatsapp(phone, message, image=None):
     url = "http://localhost:3000/send"
+    headers = {"x-api-key": "YOUR_SECRET_KEY"}
     payload = {
         "phone": phone,
         "message": message,
-        "pdfPath": pdf
+        "imagePath": image
     }
-    try:
-        r = requests.post(url, json=payload)
-        return r.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-# Usage:
-# send_whatsapp("573204973157", "Test from Python", "/path
+    r = requests.post(url, json=payload, headers=headers)
+    return r.json()
+```
