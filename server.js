@@ -48,6 +48,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const PORT = 3000;
 const SECRET_KEY = process.env.API_KEY;
 
+// Bot Command Listener
+const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
+
 // 2. Security Middleware: API Key & IP Filtering
 const securityCheck = (req, res, next) => {
     const apiKey = req.headers['x-api-key'];
@@ -128,108 +131,65 @@ client.on('disconnected', () => {
     isReady = false;
 });
 
-client.initialize();
+// Event: Message handling (Using message_create to capture both incoming and outgoing messages)
+client.on('message_create', async (msg) => {
+    // Determine the chat context:
+    // If sent by me, the target group is in 'msg.to'
+    // If received from others, the target group is in 'msg.from'
+    const chatContext = msg.fromMe ? msg.to : msg.from;
 
-// Bot Command Listener
-const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
-
-client.on('message', async msg => {
-    // GLOBAL LOG: This will tell us if the event is even firing
-    logger.info(`Message received from: ${msg.from} | Content: ${msg.body}`);
-
-    if (!msg.body || !msg.body.startsWith('/')) return;
-
-    if (msg.from !== ALLOWED_GROUP_ID) {
-        logger.warn(`Ignored message from unauthorized source: ${msg.from}`);
+    // Strict filter: only process messages within the ALLOWED_GROUP_ID
+    if (chatContext !== ALLOWED_GROUP_ID) {
         return;
     }
 
+    // Ignore messages that do not start with the command prefix '/'
+    if (!msg.body || !msg.body.startsWith('/')) {
+        return;
+    }
+
+    // Parse command and arguments
     const args = msg.body.trim().split(/\s+/);
     const command = args.shift().toLowerCase();
 
-    if (command === '/start') {
-        await msg.reply(
-            "Welcome to the Stock Notification Bot!\n\n" +
-            "Commands:\n" +
-            "/add [ticker] - Add a ticker to the active list\n" +
-            "/remove [ticker] - Remove a ticker from the active list\n" +
-            "/list - List all active tickers"
-        );
-        return;
-    }
+    logger.info(`Processing command: ${command} in group: ${chatContext}`);
 
-    if (command === '/add') {
-        if (args.length === 0) {
-            await msg.reply("Usage: /add [ticker]");
-            return;
-        }
-
-        const ticker = args[0].toUpperCase();
-        logger.info(`Adding ticker: ${ticker}`);
-
-        db.run("INSERT INTO active_tickers (ticker) VALUES (?)", [ticker], function (err) {
-            if (err) {
-                if (err.message.includes("UNIQUE constraint failed") || err.code === 'SQLITE_CONSTRAINT') {
-                    logger.warn(`Ticker ${ticker} already exists.`);
-                    msg.reply(`⚠️ ${ticker} is already in the list.`);
-                } else {
-                    logger.error(`DB error adding ticker: ${err.message}`);
-                    msg.reply(`❌ Error: ${err.message}`);
-                }
-            } else {
-                logger.info(`Successfully added ticker: ${ticker}`);
-                msg.reply(`✅ Added ${ticker} to active tickers.`);
-            }
-        });
-        return;
-    }
-
-    if (command === '/remove') {
-        if (args.length === 0) {
-            await msg.reply("Usage: /remove [ticker]");
-            return;
-        }
-
-        const ticker = args[0].toUpperCase();
-        logger.info(`Removing ticker: ${ticker}`);
-
-        db.run("DELETE FROM active_tickers WHERE ticker = ?", [ticker], function (err) {
-            if (err) {
-                logger.error(`DB error removing ticker: ${err.message}`);
-                msg.reply(`❌ Error: ${err.message}`);
-            } else if (this.changes > 0) {
-                logger.info(`Successfully removed ticker: ${ticker}`);
-                msg.reply(`✅ Removed ${ticker} from active tickers.`);
-            } else {
-                logger.warn(`Ticker ${ticker} not found for removal.`);
-                msg.reply(`⚠️ ${ticker} was not found in the list.`);
-            }
-        });
-        return;
-    }
-
+    // Command: /list
     if (command === '/list') {
-        logger.info('Listing active tickers');
-        db.all("SELECT ticker FROM active_tickers ORDER BY ticker", [], (err, rows) => {
+        db.all("SELECT ticker FROM active_tickers", [], (err, rows) => {
             if (err) {
-                logger.error(`DB error listing tickers: ${err.message}`);
-                msg.reply(`❌ Error: ${err.message}`);
-                return;
+                logger.error(`DB Error: ${err.message}`);
+                return msg.reply("Error accessing database.");
             }
-
-            if (rows && rows.length > 0) {
-                const tickers = rows.map(r => r.ticker).join('\n');
-                const message = `📋 *Active Tickers:*\n\n${tickers}`;
-                logger.info(`Found ${rows.length} tickers.`);
-                msg.reply(message);
-            } else {
-                logger.info('Active tickers list is empty.');
-                msg.reply("📋 The active tickers list is empty.");
-            }
+            const tickers = rows.map(r => r.ticker).join(', ');
+            msg.reply(tickers ? `📋 Active Tickers: ${tickers}` : "No active tickers found.");
         });
-        return;
+    }
+
+    // Command: /add [TICKER]
+    if (command === '/add' && args.length > 0) {
+        const ticker = args[0].toUpperCase();
+        db.run("INSERT OR IGNORE INTO active_tickers (ticker) VALUES (?)", [ticker], (err) => {
+            if (err) {
+                logger.error(`DB Error: ${err.message}`);
+                return msg.reply("Error saving ticker.");
+            }
+            msg.reply(`✅ Ticker ${ticker} added successfully.`);
+        });
+    }
+
+    // Command: /remove [TICKER]
+    if (command === '/remove' && args.length > 0) {
+        const ticker = args[0].toUpperCase();
+        db.run("DELETE FROM active_tickers WHERE ticker = ?", [ticker], (err) => {
+            if (err) return msg.reply("Error removing ticker.");
+            msg.reply(`🗑️ Ticker ${ticker} removed.`);
+        });
     }
 });
+
+client.initialize();
+
 
 // 4. Shared helper for sending messages
 const handleMessageRequest = async (req, res, getMedia) => {
