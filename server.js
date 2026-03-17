@@ -135,17 +135,21 @@ const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
 
 client.on('message', async msg => {
     // Only process text messages starting with "/"
-    if (!msg.body || !msg.body.startsWith('/')) return;
+    logger.info(`Received command: ${command} from ${msg.from}`);
+
+    if (!msg.body || !msg.body.startsWith('/')) {
+        logger.info('Message does not start with "/"');
+        return;
+    }
 
     // RESTRICTION: Only listen to the specific group
     if (msg.from !== ALLOWED_GROUP_ID) {
+        logger.info('Message is not from the allowed group');
         return;
     }
 
     const args = msg.body.trim().split(/\s+/);
     const command = args.shift().toLowerCase();
-
-    logger.info(`Received command: ${command} from ${msg.from}`);
 
     if (command === '/start') {
         await msg.reply(
