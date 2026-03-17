@@ -73,6 +73,7 @@ const securityCheck = (req, res, next) => {
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './wa_session' }),
     puppeteer: {
+        handleSIGINT: false, // Important for systemd, prevents Chromium from closing when server restarts
         executablePath: '/usr/bin/chromium-browser',
         headless: true,
         args: [
