@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
 const winston = require('winston');
+const { exec } = require('child_process');
 
 // Logger configuration
 const logger = winston.createLogger({
@@ -166,6 +167,10 @@ client.on('message_create', async (msg) => {
         });
     }
 
+    if (command === '/scan') {
+
+    }
+
     // Command: /add [TICKER]
     if (command === '/add' && args.length > 0) {
         const ticker = args[0].toUpperCase();
@@ -184,6 +189,21 @@ client.on('message_create', async (msg) => {
         db.run("DELETE FROM active_tickers WHERE ticker = ?", [ticker], (err) => {
             if (err) return msg.reply("Error removing ticker.");
             msg.reply(`🗑️ Ticker ${ticker} removed.`);
+        });
+    }
+
+    // Command: /scan
+    if (command === '/scan') {
+        msg.reply('🔄 Running stock scan...');
+        const scanCmd = 'PYTHONIOENCODING=utf-8 /home/diego/repos/stock-notification/.venv/bin/python /home/diego/repos/stock-notification/src/main.py >> /mnt/disco/mylogs/stock-notification/main.log 2>&1';
+        exec(scanCmd, (error, stdout, stderr) => {
+            if (error) {
+                logger.error(`Scan process error: ${error.message}`);
+                msg.reply(`❌ Scan failed: ${error.message}`);
+                return;
+            }
+            logger.info('Scan process completed successfully.');
+            msg.reply('✅ Stock scan completed.');
         });
     }
 });
