@@ -74,7 +74,7 @@ const securityCheck = (req, res, next) => {
 
 // 3. Initialize WhatsApp Client ONCE
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './wa_session' }),
+    authStrategy: new LocalAuth({ dataPath: process.env.SESSION_PATH || './wa_session' }),
     puppeteer: {
         handleSIGINT: false, // Important for systemd, prevents Chromium from closing when server restarts
         executablePath: '/usr/bin/chromium-browser',
@@ -161,7 +161,7 @@ client.on('message_create', async (msg) => {
                 logger.error(`DB Error: ${err.message}`);
                 return msg.reply("Error accessing database.");
             }
-            const tickers = rows.map(r => r.ticker).join(', ');
+            const tickers = rows.map(r => r.ticker).sort().join(', ');
             msg.reply(tickers ? `📋 Active Tickers: ${tickers}` : "No active tickers found.");
         });
     }
