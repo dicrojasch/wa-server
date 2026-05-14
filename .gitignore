@@ -2,3 +2,5 @@
 node_modules
 wa_session/
 *.log
+.wwebjs_cache/
+trading_data.db

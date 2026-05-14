@@ -8,6 +8,8 @@ const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
 const winston = require('winston');
 const { exec } = require('child_process');
+const axios = require('axios');
+const FormData = require('form-data');
 
 // Logger configuration
 const logger = winston.createLogger({
@@ -42,7 +44,7 @@ const app = express();
 
 // 1. Basic Security Headers
 app.use(helmet());
-// Reemplaza app.use(express.json()); con esto:
+// Replace app.use(express.json()); with this to handle large payloads:
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -51,6 +53,7 @@ const SECRET_KEY = process.env.API_KEY;
 
 // Bot Command Listener
 const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
+const EXPENSES_GROUP_ID = process.env.EXPENSES_GROUP_ID;
 
 // 2. Security Middleware: API Key & IP Filtering
 const securityCheck = (req, res, next) => {
@@ -139,76 +142,182 @@ client.on('message_create', async (msg) => {
     // If received from others, the target group is in 'msg.from'
     const chatContext = msg.fromMe ? msg.to : msg.from;
 
-    // Strict filter: only process messages within the ALLOWED_GROUP_ID
-    if (chatContext !== ALLOWED_GROUP_ID) {
+    // Strict filter: only process messages within allowed groups
+    if (chatContext !== ALLOWED_GROUP_ID && chatContext !== EXPENSES_GROUP_ID) {
         return;
     }
-
-    // Ignore messages that do not start with the command prefix '/'
-    if (!msg.body || !msg.body.startsWith('/')) {
+    // Prevent circular loops: do not process the bot's own confirmation messages
+    if (msg.body && (msg.body.startsWith('✅') || msg.body.startsWith('❌'))) {
         return;
     }
+    logger.info(`Processing message from group: ${chatContext}`);
+    // --- Expenses Automation Logic ---
+    if (chatContext === EXPENSES_GROUP_ID) {
 
-    // Parse command and arguments
-    const args = msg.body.trim().split(/\s+/);
-    const command = args.shift().toLowerCase();
+        logger.info(`Processing message from expenses group: ${chatContext}`);
+        try {
+            logger.info(`Full message content from ${chatContext}: hasMedia: ${msg.hasMedia}, type: ${msg.type}, body: ${msg.body} , to: ${msg.to}, from: ${msg.from} `);
+            // Handle audio/voice messages
+            if (msg.hasMedia && (msg.type === 'audio' || msg.type === 'voice' || msg.type === 'ptt')) {
+                logger.info(`Processing voice message from expenses group: ${chatContext}`);
+                const media = await msg.downloadMedia();
+                if (media) {
+                    const formData = new FormData();
+                    const buffer = Buffer.from(media.data, 'base64');
+                    formData.append('file', buffer, {
+                        filename: media.filename || 'voice_expense.ogg',
+                        contentType: media.mimetype,
+                    });
 
-    logger.info(`Processing command: ${command} in group: ${chatContext}`);
-
-    // Command: /list
-    if (command === '/list') {
-        db.all("SELECT ticker FROM active_tickers", [], (err, rows) => {
-            if (err) {
-                logger.error(`DB Error: ${err.message}`);
-                return msg.reply("Error accessing database.");
+                    await axios.post('http://localhost:8000/process-audio', formData, {
+                        headers: formData.getHeaders(),
+                    });
+                    logger.info('Voice message successfully sent to expenses API.');
+                    await msg.reply('✅ Voice expense received and sent for processing.');
+                    return; // Stop further processing for this message
+                } else {
+                    await msg.reply('❌ Failed to download audio media.');
+                    return;
+                }
             }
-            const tickers = rows.map(r => r.ticker).sort().join(', ');
-            msg.reply(tickers ? `📋 Active Tickers: ${tickers}` : "No active tickers found.");
-        });
-    }
 
-    if (command === '/scan') {
-
-    }
-
-    // Command: /add [TICKER]
-    if (command === '/add' && args.length > 0) {
-        const ticker = args[0].toUpperCase();
-        db.run("INSERT OR IGNORE INTO active_tickers (ticker) VALUES (?)", [ticker], (err) => {
-            if (err) {
-                logger.error(`DB Error: ${err.message}`);
-                return msg.reply("Error saving ticker.");
+            // Handle text messages in format: "Price - Description"
+            if (msg.body && !msg.body.startsWith('/')) {
+                const expensePattern = /^(\d+(?:\.\d+)?)\s*-\s*(.+)$/gm;
+                if (expensePattern.test(msg.body)) {
+                    logger.info(`Processing text expense from group ${chatContext}: ${msg.body}`);
+                    await axios.post('http://localhost:8000/process-text', {
+                        body: msg.body
+                    });
+                    logger.info('Text expense successfully sent to API.');
+                    await msg.reply(`✅ Expense registered: ${msg.body}`);
+                    return; // Stop further processing for this message
+                } else {
+                    // Not matching the pattern - inform the user about the expected format
+                    logger.warn(`Malformed expense received in ${chatContext}: ${msg.body}`);
+                    await msg.reply('❌ Invalid format. Please use "Price - Description" (e.g., "15.50 - Lunch").');
+                    return;
+                }
             }
-            msg.reply(`✅ Ticker ${ticker} added successfully.`);
-        });
-    }
+        } catch (error) {
+            logger.error(`Expenses API Error: ${error.message}`);
+            await msg.reply(`❌ Error processing expense: ${error.message}`);
+            return;
+        }
+    } else {
 
-    // Command: /remove [TICKER]
-    if (command === '/remove' && args.length > 0) {
-        const ticker = args[0].toUpperCase();
-        db.run("DELETE FROM active_tickers WHERE ticker = ?", [ticker], (err) => {
-            if (err) return msg.reply("Error removing ticker.");
-            msg.reply(`🗑️ Ticker ${ticker} removed.`);
-        });
-    }
+        // --- Bot Command Logic ---
+        // Ignore messages that do not start with the command prefix '/' or are not from the main allowed group
+        if (chatContext !== ALLOWED_GROUP_ID || !msg.body || !msg.body.startsWith('/')) {
+            return;
+        }
 
-    // Command: /scan
-    if (command === '/scan') {
-        msg.reply('🔄 Running stock scan...');
-        const scanCmd = 'PYTHONIOENCODING=utf-8 /home/diego/repos/stock-notification/.venv/bin/python /home/diego/repos/stock-notification/src/main.py >> /mnt/disco/mylogs/stock-notification/main.log 2>&1';
-        exec(scanCmd, (error, stdout, stderr) => {
-            if (error) {
-                logger.error(`Scan process error: ${error.message}`);
-                msg.reply(`❌ Scan failed: ${error.message}`);
-                return;
-            }
-            logger.info('Scan process completed successfully.');
-            msg.reply('✅ Stock scan completed.');
-        });
+        // Parse command and arguments
+        const args = msg.body.trim().split(/\s+/);
+        const command = args.shift().toLowerCase();
+
+        logger.info(`Processing command: ${command} in group: ${chatContext}`);
+
+        // Command: /list
+        if (command === '/list') {
+            db.all("SELECT ticker FROM active_tickers", [], (err, rows) => {
+                if (err) {
+                    logger.error(`DB Error: ${err.message}`);
+                    return msg.reply("Error accessing database.");
+                }
+                const tickers = rows.map(r => r.ticker).sort().join(', ');
+                msg.reply(tickers ? `📋 Active Tickers: ${tickers}` : "No active tickers found.");
+            });
+        }
+
+        if (command === '/scan') {
+
+        }
+
+        // Command: /add [TICKER]
+        if (command === '/add' && args.length > 0) {
+            const ticker = args[0].toUpperCase();
+            db.run("INSERT OR IGNORE INTO active_tickers (ticker) VALUES (?)", [ticker], (err) => {
+                if (err) {
+                    logger.error(`DB Error: ${err.message}`);
+                    return msg.reply("Error saving ticker.");
+                }
+                msg.reply(`✅ Ticker ${ticker} added successfully.`);
+            });
+        }
+
+        // Command: /remove [TICKER]
+        if (command === '/remove' && args.length > 0) {
+            const ticker = args[0].toUpperCase();
+            db.run("DELETE FROM active_tickers WHERE ticker = ?", [ticker], (err) => {
+                if (err) return msg.reply("Error removing ticker.");
+                msg.reply(`🗑️ Ticker ${ticker} removed.`);
+            });
+        }
+
+        // Command: /scan
+        if (command === '/scan') {
+            msg.reply('🔄 Running stock scan...');
+            const scanCmd = 'PYTHONIOENCODING=utf-8 /home/diego/repos/stock-notification/.venv/bin/python /home/diego/repos/stock-notification/src/main.py >> /mnt/disco/mylogs/stock-notification/main.log 2>&1';
+            exec(scanCmd, (error, stdout, stderr) => {
+                if (error) {
+                    logger.error(`Scan process error: ${error.message}`);
+                    msg.reply(`❌ Scan failed: ${error.message}`);
+                    return;
+                }
+                logger.info('Scan process completed successfully.');
+                msg.reply('✅ Stock scan completed.');
+            });
+        }
     }
 });
 
+// --- Startup Cleanup and Initialization ---
+const cleanupLock = () => {
+    const sessionPath = process.env.SESSION_PATH || './wa_session';
+    const lockPath = path.join(sessionPath, 'session', 'SingletonLock');
+    if (fs.existsSync(lockPath)) {
+        try {
+            logger.info('Removing stale Puppeteer lock file...');
+            fs.unlinkSync(lockPath);
+            logger.info('Lock file removed.');
+        } catch (err) {
+            logger.warn(`Could not remove lock file: ${err.message}`);
+        }
+    }
+};
+
+cleanupLock();
 client.initialize();
+
+// --- Graceful Shutdown Handler ---
+const gracefulShutdown = async (signal) => {
+    logger.info(`${signal} received. Shutting down gracefully...`);
+
+    try {
+        if (isReady) {
+            logger.info('Destroying WhatsApp client...');
+            await client.destroy();
+        }
+
+        logger.info('Closing database connection...');
+        db.close((err) => {
+            if (err) {
+                logger.error(`Error closing database: ${err.message}`);
+            } else {
+                logger.info('Database connection closed.');
+            }
+            process.exit(0);
+        });
+    } catch (err) {
+        logger.error(`Error during shutdown: ${err.message}`);
+        process.exit(1);
+    }
+};
+
+// Handle termination signals
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 
 // 4. Shared helper for sending messages
