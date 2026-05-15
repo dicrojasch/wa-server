@@ -183,19 +183,21 @@ client.on('message_create', async (msg) => {
 
             // Handle text messages in format: "Price - Description"
             if (msg.body && !msg.body.startsWith('/')) {
-                const expensePattern = /^(\d+(?:\.\d+)?)\s*-\s*(.+)$/gm;
+                const expensePattern = /([\d.,]+)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+?)(?=\s+[\d.,]+|$)/g;
+                msg.body = msg.body.toLowerCase();
                 if (expensePattern.test(msg.body)) {
-                    logger.info(`Processing text expense from group ${chatContext}: ${msg.body}`);
+                    const formattedText = msg.body.replace(/([a-zA-ZáéíóúñÁÉÍÓÚÑ])\s+(?=\d)/g, '$1, ');
+                    logger.info(`Processing text expense from group ${chatContext}: ${formattedText}`);
                     await axios.post('http://localhost:8000/process-text', {
-                        body: msg.body
+                        body: formattedText
                     });
                     logger.info('Text expense successfully sent to API.');
-                    await msg.reply(`✅ Expense registered: ${msg.body}`);
+                    await msg.reply(`✅ Expense registered: ${formattedText}`);
                     return; // Stop further processing for this message
                 } else {
                     // Not matching the pattern - inform the user about the expected format
-                    logger.warn(`Malformed expense received in ${chatContext}: ${msg.body}`);
-                    await msg.reply('❌ Invalid format. Please use "Price - Description" (e.g., "15.50 - Lunch").');
+                    logger.info(`Malformed expense received in ${chatContext}: ${msg.body}`);
+                    await msg.reply('❌ Invalid format. Please use "Price Description" (e.g., "15000 almuerzo").');
                     return;
                 }
             }
