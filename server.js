@@ -183,7 +183,7 @@ client.on('message_create', async (msg) => {
 
             // Handle text messages in format: "Price - Description"
             if (msg.body && !msg.body.startsWith('/')) {
-                const expensePattern = /([\d.,]+)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+?)(?=\s+[\d.,]+|$)/g;
+                const expensePattern = /([\d.,]+)\s+([a-záéíóúñ\d\s]+?)(?=\s+[\d.,]+|$)/g;
                 msg.body = msg.body.toLowerCase();
                 if (expensePattern.test(msg.body)) {
                     const formattedText = msg.body.replace(/([a-zA-ZáéíóúñÁÉÍÓÚÑ])\s+(?=\d)/g, '$1, ');
