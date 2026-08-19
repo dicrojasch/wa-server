@@ -89,6 +89,14 @@ Sends a text message and an optional local image.
 Sends a message with a base64 encoded image.
 * **Body (JSON):** `{"phone": "...", "message": "...", "imageBase64": "...", "mimetype": "image/png"}`
 
+#### `POST /send-video`
+Sends a message with a video file (using either a local file path or base64 data).
+* **Body (JSON):** `{"phone": "...", "message": "...", "videoPath": "...", "videoBase64": "...", "mimetype": "video/mp4"}`
+
+#### `GET /groups`
+Retrieves a JSON array of all groups the authenticated WhatsApp user is a member of.
+* **Response (JSON):** `[{"name": "Group Name", "id": "123456789@g.us"}]`
+
 ---
 
 ## 🐍 Python Integration
@@ -106,4 +114,32 @@ def send_whatsapp(phone, message, image=None):
     }
     r = requests.post(url, json=payload, headers=headers)
     return r.json()
+
+def send_whatsapp_video(phone, message, video_path=None, video_base64=None, mimetype='video/mp4', filename='video.mp4'):
+    url = "http://localhost:3000/send-video"
+    headers = {"x-api-key": "YOUR_SECRET_KEY"}
+    
+    payload = {
+        "phone": phone,
+        "message": message,
+    }
+    
+    # Add video data if provided
+    if video_path:
+        payload["videoPath"] = video_path
+    elif video_base64:
+        payload["videoBase64"] = video_base64
+        payload["mimetype"] = mimetype
+        payload["filename"] = filename
+    
+    r = requests.post(url, json=payload, headers=headers)
+    return r.json()
+
+
+def get_groups():
+    url = "http://localhost:3000/groups"
+    headers = {"x-api-key": "YOUR_SECRET_KEY"}
+    r = requests.get(url, headers=headers)
+    return r.json()
+    
 ```
