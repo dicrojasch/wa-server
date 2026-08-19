@@ -81,7 +81,7 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: process.env.SESSION_PATH || './wa_session' }),
     webVersionCache: {
         type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1045490272-alpha.html'
     },
     puppeteer: {
         handleSIGINT: false, // Important for systemd, prevents Chromium from closing when server restarts
@@ -91,6 +91,10 @@ const client = new Client({
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', // Crucial to save RAM on Raspberry Pi
             '--disable-gpu'
         ]
     }
