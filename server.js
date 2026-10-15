@@ -79,10 +79,6 @@ const securityCheck = (req, res, next) => {
 // 3. Initialize WhatsApp Client ONCE
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: process.env.SESSION_PATH || './wa_session' }),
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1045490272-alpha.html'
-    },
     puppeteer: {
         handleSIGINT: false, // Important for systemd, prevents Chromium from closing when server restarts
         executablePath: '/usr/bin/chromium-browser',
@@ -101,6 +97,8 @@ const client = new Client({
 });
 
 let isReady = false;
+let shuttingDown = false;
+let server;
 
 client.on('qr', (qr) => {
     logger.info('Scan QR code requested.');
@@ -314,37 +312,25 @@ client.on('message_create', (msg) => {
     }
 });
 
-// --- Startup Cleanup and Initialization ---
-const cleanupLock = () => {
-    const sessionPath = process.env.SESSION_PATH || './wa_session';
-    const lockPath = path.join(sessionPath, 'session', 'SingletonLock');
-    if (fs.existsSync(lockPath)) {
-        try {
-            logger.info('Removing stale Puppeteer lock file...');
-            fs.unlinkSync(lockPath);
-            logger.info('Lock file removed.');
-        } catch (err) {
-            logger.warn(`Could not remove lock file: ${err.message}`);
-        }
-    }
-};
-
-cleanupLock();
-client.initialize();
+// --- Startup and Initialization ---
+client.initialize().catch((err) => gracefulShutdown('WhatsApp initialization failed', 1, err));
 
 // --- Graceful Shutdown Handler ---
-const gracefulShutdown = async (signal) => {
+const gracefulShutdown = async (signal, exitCode = 0, cause) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info(`${signal} received. Shutting down gracefully...`);
+    if (cause) logger.error(`WhatsApp initialization failed: ${cause.stack || cause}`);
+    isReady = false;
 
     try {
-        if (isReady && client) {
+        if (client.pupBrowser) {
             logger.info('Destroying WhatsApp client...');
             await client.destroy();
             logger.info('WhatsApp client destroyed successfully.');
         }
 
-        // 1. Si tienes un servidor Express corriendo (ej. const server = express().listen(...))
-        if (typeof server !== 'undefined' && server.close) {
+        if (server) {
             logger.info('Closing Express server...');
             await new Promise((resolve) => server.close(resolve));
             logger.info('Express server closed.');
@@ -363,8 +349,7 @@ const gracefulShutdown = async (signal) => {
         }
 
         logger.info('Shutdown complete. Exiting process.');
-        // Fuerza la salida exitosa (código 0) una vez que todo se limpió
-        process.exit(0);
+        process.exit(exitCode);
 
     } catch (err) {
         logger.error(`Error during shutdown: ${err.message}`);
@@ -514,6 +499,6 @@ app.get('/groups', securityCheck, async (req, res) => {
 });
 
 // 6. Start the server on port 3000
-app.listen(PORT, () => {
+server = app.listen(PORT, () => {
     logger.info(`Local API listening on http://localhost:${PORT}`);
 });
