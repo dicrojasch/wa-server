@@ -23,8 +23,10 @@ This server acts as a persistent bridge between your Python logic and the WhatsA
 
 2.  **Install dependencies:**
     ```bash
-    npm install whatsapp-web.js qrcode-terminal express dotenv helmet sqlite3
+    npm ci
     ```
+
+    `npm ci` runs the project's postinstall script, which applies the media send fix required by whatsapp-web.js 1.34.7. If dependencies are already installed after updating the project, run `npm run postinstall` before restarting the service.
 
 ---
 
